@@ -115,7 +115,9 @@ pub(crate) fn defend(m: &mut Mission, data: &GameData, th: &TheaterData) -> Resu
         .copied()
         .filter(|&i| NPP_SHAPES.contains(&w.objects[i as usize].shape()))
         .collect();
-    let target = if !npps.is_empty() && r.r(4) == 0 {
+    let target = if !th.drone_targets.is_empty() {
+        th.drone_targets[r.r(th.drone_targets.len() as i32) as usize] as i32
+    } else if !npps.is_empty() && r.r(4) == 0 {
         npps[r.r(npps.len() as i32) as usize]
     } else {
         places[r.r(places.len() as i32) as usize]

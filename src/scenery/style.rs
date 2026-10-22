@@ -138,7 +138,7 @@ impl Style {
             },
             // Ukraine: steppe farmland with shelterbelts, poplars and acacias, white and
             // cream houses with grey, green and red-brown roofs, panel blocks in the towns.
-            "ua" => Style {
+            "ua" | "uo" => Style {
                 towns: 0.42,
                 town_size: 0.9,
                 town_mix: [0.86, 0.12, 0.02],
@@ -246,6 +246,35 @@ impl Style {
             roof: Roof::Flat,
             wall: rng.pick(&[0xE1, 0xE2, 0xE3, 0xC1, 0xE4, 0xF2]),
             roof_colour: 0xE7,
+            seed: rng.u64(),
+        }
+    }
+
+    /// The colours of a real building (`osm.rs`) of a kind, wall height and roof.
+    pub fn footprint(&self, rng: &mut Rng, kind: Kind, roof: Roof, h: f32) -> Building {
+        let pitched = roof != Roof::Flat;
+        let (wall, roof_colour) = match kind {
+            Kind::Apartment => (
+                rng.pick(&[0xE1, 0xE2, 0xE3, 0xC1, 0xE4, 0xF2]),
+                if pitched { rng.pick(self.roofs) } else { 0xE7 },
+            ),
+            Kind::Tower => (rng.pick(&[0xF2, 0xF4, 0xE3, 0xB4]), 0xE7),
+            Kind::Church => (rng.pick(&[0xE1, 0xC1, 0xE3]), rng.pick(self.roofs)),
+            Kind::Barn | Kind::Shed => {
+                (rng.pick(self.barn), if pitched { rng.pick(self.roofs) } else { 0xE6 })
+            }
+            _ => (rng.pick(self.walls), rng.pick(self.roofs)),
+        };
+        Building {
+            p: DVec2::ZERO,
+            dir: DVec2::X,
+            kind,
+            l: 10.0,
+            w: 10.0,
+            h,
+            roof,
+            wall,
+            roof_colour,
             seed: rng.u64(),
         }
     }

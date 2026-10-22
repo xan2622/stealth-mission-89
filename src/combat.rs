@@ -522,7 +522,8 @@ struct StepParams<'w, 's> {
 pub struct PlayerCollision(pub bool);
 
 /// Tests the pilot's eye (not the camera point) against the models' plane hulls of visible tile
-/// objects.
+/// objects, and against the buildings of the real towns (`scenery/osm.rs`).
+#[allow(clippy::too_many_arguments)]
 fn detect_collision(
     mut collision: ResMut<PlayerCollision>,
     player: Query<&GlobalTransform, With<crate::camera::HeadAnchor>>,
@@ -534,10 +535,18 @@ fn detect_collision(
         &InheritedVisibility,
     )>,
     tile_roots: Query<(), With<crate::world::TileObject>>,
+    scenery: Option<Res<crate::scenery::Scenery>>,
+    origin: Res<crate::world::FloatingOrigin>,
 ) {
     collision.0 = false;
     let Ok(p) = player.single() else { return };
     let p = p.translation();
+    // Bevy metres from the floating origin -> ground metres (east, north) and height.
+    let eye = origin.origin + p.as_dvec3();
+    if scenery.is_some_and(|s| s.in_building(bevy::math::DVec2::new(eye.x, -eye.z), eye.y)) {
+        collision.0 = true;
+        return;
+    }
     for (hull, lod, shown, tf, vis) in &hulls {
         if !vis.get() || !shown.main || !tile_roots.contains(lod.root) {
             continue;

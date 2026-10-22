@@ -22,6 +22,7 @@ mod fields;
 mod geom;
 mod ground;
 mod network;
+mod osm;
 mod style;
 
 use std::collections::HashMap;
@@ -80,13 +81,15 @@ fn radius(tier: Tier) -> f64 {
         Tier::Detail => 1000.0,
         Tier::Far => 3500.0,
         Tier::Fields => 24_000.0,
+        // Houses are a few pixels at this distance; the large buildings stay in the main tier.
+        Tier::Small => 2500.0,
     }
 }
 
 /// The other tree tier of a block (shown until this one is built, so trees don't blink).
 fn counterpart(tier: Tier) -> Option<Tier> {
     match tier {
-        Tier::Main | Tier::Fields => None,
+        Tier::Main | Tier::Fields | Tier::Small => None,
         Tier::Detail => Some(Tier::Far),
         Tier::Far => Some(Tier::Detail),
     }
@@ -111,6 +114,12 @@ impl Scenery {
     /// The theater has generated towns (the green theaters).
     pub fn has_towns(&self) -> bool {
         !self.net.towns.is_empty()
+    }
+
+    /// Whether a point (ground metres, metres above the ground) is inside a building of the
+    /// real towns (`osm.rs`): the pilot flew into it.
+    pub fn in_building(&self, p: DVec2, alt: f64) -> bool {
+        self.net.osm_solid(p, alt)
     }
 
     /// Open land (not water or concrete) clear of raised objects by `r` metres.
@@ -320,13 +329,16 @@ fn stream_blocks(
         (_, _, false) => &[Tier::Main, Tier::Detail, Tier::Far],
         (_, _, true) => &[Tier::Main, Tier::Detail, Tier::Far, Tier::Fields],
     };
+    // The real towns' small buildings come with the main tier.
+    let small =
+        (tiers.contains(&Tier::Main) && !scenery.net.near_only.is_empty()).then_some(Tier::Small);
     let eyes = std::iter::once((anchor.0, f64::MAX)).chain(
         sites.points.iter().chain(&sites.follow).chain(&sites.pod).map(|&p| (p, SITE_RADIUS)),
     );
     for (eye, max_r) in eyes {
         let (east, north, _) = bevy_to_wu(eye);
         let eye = bevy::math::DVec2::new(east, north) * WU;
-        for &tier in tiers {
+        for tier in tiers.iter().copied().chain(small) {
             let r = radius(tier).min(max_r);
             let size = tier.block_size();
             let (lo, hi) =
@@ -417,12 +429,14 @@ fn spawn_geom(
     // their centre's haze level); farmland is ground and hazes like the coarse terrain levels.
     let tag = MeshTag(match tier {
         Tier::Fields => mesh_tag(3, 4, false),
-        Tier::Main => mesh_tag(1, 6, false),
+        Tier::Main | Tier::Small => mesh_tag(1, 6, false),
         _ => mesh_tag(1, 5, false),
     });
     let mut children = Vec::new();
-    // Buildings and structures (main tier) are warm in the FLIR picture, trees are not.
-    let solid_tag = if tier == Tier::Main { MeshTag(tag.0 | TAG_WARM) } else { tag.clone() };
+    // Buildings and structures (main and small tiers) are warm in the FLIR picture, trees are
+    // not.
+    let warm = matches!(tier, Tier::Main | Tier::Small);
+    let solid_tag = if warm { MeshTag(tag.0 | TAG_WARM) } else { tag.clone() };
     for (c, tris) in geom.solid {
         let e = commands
             .spawn((

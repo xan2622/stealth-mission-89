@@ -329,7 +329,7 @@ pub(crate) const BRIGHT: egui::Color32 = egui::Color32::from_rgb(190, 255, 205);
 pub(crate) const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 176, 0);
 
 /// Hover facts per theater ([`THEATERS`] order).
-const THEATER_FACTS: [&[&str]; 10] = [
+const THEATER_FACTS: [&[&str]; 11] = [
     &[
         "Gulf of Sidra and the Libyan coast",
         "Era of Operation El Dorado Canyon",
@@ -363,6 +363,11 @@ const THEATER_FACTS: [&[&str]; 10] = [
         "Eastern Ukraine, Crimea and southern Russia",
         "Front line from Kharkiv to Kherson burns",
         "Open farmland, ruined towns at the front",
+    ],
+    &[
+        "Test copy of the Ukraine theater",
+        "Kharkiv built from OpenStreetMap footprints",
+        "Data (c) OpenStreetMap contributors, ODbL",
     ],
 ];
 const ROE: [(&str, &[&str]); 3] = [
@@ -429,7 +434,7 @@ const KINDS: [(MissionKind, &str, &[&str]); 5] = [
 ];
 
 /// Theaters with drone launch sites (drone defense missions).
-const DRONE_THEATERS: [&str; 1] = ["ua"];
+const DRONE_THEATERS: [&str; 2] = ["ua", "uo"];
 const OPPONENTS: [(&str, &[&str]); 4] = [
     ("Green", &["Inexperienced enemy crews", "Easiest setting"]),
     ("Regular", &["Average enemy crews", "Default setting"]),

@@ -19,7 +19,7 @@ pub use text::{Briefing, Orders, OrdersLine};
 pub use weather::{CloudKind, Layer, Sky, Weather};
 pub use world::{FlightUnit, MissionWorld, NAMES_BYTES, TheaterData, WorldObject};
 
-pub const THEATER_NAMES: [&str; 10] = [
+pub const THEATER_NAMES: [&str; 11] = [
     "Libya",
     "Persian Gulf",
     "North Cape",
@@ -30,6 +30,7 @@ pub const THEATER_NAMES: [&str; 10] = [
     "Cuba",
     "Korea",
     "Ukraine",
+    "Ukraine OSM",
 ];
 pub const ROE_NAMES: [&str; 3] = ["Cold War", "Limited War", "Conventional War"];
 pub const OPPONENT_NAMES: [&str; 4] = ["Green", "Regular", "Veteran", "Elite"];

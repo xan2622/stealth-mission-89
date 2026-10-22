@@ -6,5 +6,7 @@ pub mod wld;
 pub const THEATERS: [&str; 9] = ["LB", "PG", "NC", "CE", "VN", "ME", "KU", "CU", "KO"];
 
 /// All theater codes: the nine classic theaters, then the remake's own (their data exists
-/// only in the shipped assets).
-pub const ALL_THEATERS: [&str; 10] = ["LB", "PG", "NC", "CE", "VN", "ME", "KU", "CU", "KO", "UA"];
+/// only in the shipped assets). UO is a test copy of UA with Kharkiv's buildings from
+/// OpenStreetMap.
+pub const ALL_THEATERS: [&str; 11] =
+    ["LB", "PG", "NC", "CE", "VN", "ME", "KU", "CU", "KO", "UA", "UO"];

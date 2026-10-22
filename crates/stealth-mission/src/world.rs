@@ -128,6 +128,10 @@ pub struct TheaterData {
     /// World objects the enemy launches attack drones from (remake theaters).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub launch_sites: Vec<i16>,
+    /// World objects the drone defense protects, instead of any friendly city or nuclear
+    /// plant (the OpenStreetMap test theater: its real town).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drone_targets: Vec<i16>,
     pub world: MissionWorld,
     /// Terrain tile grids: g4 (4x4), g3 (16x16), g2/g1/g0 (32 blocks of 4x4).
     pub(crate) g: [Vec<u8>; 5],

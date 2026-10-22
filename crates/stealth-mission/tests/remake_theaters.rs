@@ -116,3 +116,27 @@ fn ukraine_drone_defense() {
     let w = generate(&data, &s, Seed::Srand(5)).unwrap().drones.unwrap();
     assert!(!w.defend && (1..=3).contains(&w.count));
 }
+
+#[test]
+fn osm_test_theater_defends_kharkiv() {
+    let data = data();
+    let theater = stealth_formats::ALL_THEATERS.iter().position(|t| *t == "UO").unwrap();
+    assert_eq!(data.theaters[theater].drone_targets, [88]);
+    for seed in 0..20u16 {
+        let s = MissionSettings {
+            theater,
+            roe: (seed % 3) as u8,
+            kind: MissionKind::DroneDefense,
+            opponents: (seed % 4) as u8,
+            ..Default::default()
+        };
+        let m = generate(&data, &s, Seed::Srand(seed * 131 + 7))
+            .unwrap_or_else(|e| panic!("seed {seed}: {e:#}"));
+        let w = m.drones.as_ref().expect("a drone wave");
+        assert_eq!((w.target, w.target_name.as_str(), w.nuclear), (88, "Kharkiv", false));
+        assert_eq!(m.primary.place_name, "Kharkiv");
+    }
+    // The Ukraine theater itself still picks among its cities and plants.
+    let ua = stealth_formats::ALL_THEATERS.iter().position(|t| *t == "UA").unwrap();
+    assert!(data.theaters[ua].drone_targets.is_empty());
+}

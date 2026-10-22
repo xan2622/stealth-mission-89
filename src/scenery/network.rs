@@ -3,7 +3,11 @@
 //! between the larger towns, pole lines along some roads, and the buildings of towns,
 //! industrial sites and farms. Ground positions are metres (x east, y north).
 
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+
 use bevy::math::DVec2;
+use serde::Deserialize;
 
 use super::ground::{Ground, Index};
 use super::style::Style;
@@ -118,7 +122,7 @@ pub struct Road {
 }
 
 impl Road {
-    fn new(pts: Vec<DVec2>, kind: RoadKind, width: f64) -> Self {
+    pub(super) fn new(pts: Vec<DVec2>, kind: RoadKind, width: f64) -> Self {
         let mut arc = vec![0.0];
         for w in pts.windows(2) {
             arc.push(arc.last().unwrap() + w[0].distance(w[1]));
@@ -127,7 +131,7 @@ impl Road {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
 pub enum Kind {
     House,
     Barn,
@@ -150,7 +154,7 @@ pub enum Kind {
     Sign,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
 pub enum Roof {
     Flat,
     Gable,
@@ -195,6 +199,13 @@ pub struct Network {
     pub segments: Vec<(u32, u32)>,
     pub buildings: Vec<Building>,
     pub building_index: Index,
+    /// Real footprints (`osm.rs`) by building id: walls along the outline and its courtyards
+    /// and a flat roof instead of the building's rectangle.
+    pub outlines: HashMap<u32, super::osm::Outline>,
+    /// Buildings drawn only near the viewpoint (`Tier::Small`): the real towns' small ones.
+    pub near_only: HashSet<u32>,
+    /// Building ids of the real towns (`osm.rs`), one range per town.
+    pub osm: Vec<Range<u32>>,
     pub lines: Vec<PowerLine>,
     /// (line, pylon) ids by pylon position.
     pub pylon_index: Index,
@@ -245,14 +256,24 @@ impl Network {
             segments: vec![],
             buildings: vec![],
             building_index: Index::default(),
+            outlines: HashMap::new(),
+            near_only: HashSet::new(),
+            osm: vec![],
             lines: vec![],
             pylon_index: Index::default(),
             pylons: vec![],
         };
+        // Real towns (OpenStreetMap): their own streets and buildings, not generated ones. The
+        // sites are the first towns, in order.
+        let real: Vec<Option<super::osm::OsmTown>> =
+            sites.iter().map(|s| s.osm.as_deref().map(super::osm::load)).collect();
         n.real_towns(sites);
         n.place_towns(ground, style);
         for t in 0..n.towns.len() {
-            n.streets(t, ground, style);
+            match real.get(t).and_then(Option::as_ref) {
+                Some(o) => n.osm_roads(t, o, ground),
+                None => n.streets(t, ground, style),
+            }
         }
         for h in &ground.highways {
             n.roads.push(Road::new(subdivide(h, 150.0), RoadKind::Highway, 10.0));
@@ -260,7 +281,10 @@ impl Network {
         n.connect_towns(ground, style);
         n.index_roads();
         for t in 0..n.towns.len() {
-            n.town_buildings(t, ground, style);
+            match real.get(t).and_then(Option::as_ref) {
+                Some(o) => n.osm_buildings(t, o, ground, style),
+                None => n.town_buildings(t, ground, style),
+            }
         }
         n.farms(ground, style);
         n.power_lines(ground, style);
@@ -442,10 +466,15 @@ impl Network {
         }
     }
 
-    fn add_building(&mut self, b: Building) {
+    pub(super) fn add_building(&mut self, b: Building) {
         let d = DVec2::splat(b.radius());
+        self.insert_building(b, b.p - d, b.p + d);
+    }
+
+    /// Adds a building indexed over the rectangle `min`..`max`.
+    pub(super) fn insert_building(&mut self, b: Building, min: DVec2, max: DVec2) {
         let id = self.buildings.len() as u32;
-        self.building_index.insert(b.p - d, b.p + d, id);
+        self.building_index.insert(min, max, id);
         self.buildings.push(b);
     }
 

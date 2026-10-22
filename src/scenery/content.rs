@@ -12,6 +12,7 @@ use super::Scenery;
 use super::fields;
 use super::geom::{Geom, rect, ring};
 use super::network::{Building, Kind, Network, Rng, RoadKind, Roof, hash, noise};
+use super::osm::Outline;
 use super::style::Tree;
 
 /// Block size (metres).
@@ -47,6 +48,8 @@ pub enum Tier {
     Far,
     /// Farmland: fields and the shelterbelt strips, in `FIELD_BLOCK` blocks.
     Fields,
+    /// The real towns' houses and other small buildings (`osm.rs`), near the viewpoint only.
+    Small,
 }
 
 impl Tier {
@@ -100,15 +103,10 @@ pub fn build(sc: &Scenery, bx: i32, by: i32, tier: Tier) -> Geom {
     match tier {
         Tier::Main => {
             roads(&sc.net, &f, &mut g);
-            let (min, max) = (f.min, f.min + DVec2::splat(BLOCK));
-            for i in sc.net.building_index.around(min, max) {
-                let b = &sc.net.buildings[i as usize];
-                if f.contains(b.p) {
-                    building(b, &f, &mut g);
-                }
-            }
+            buildings(sc, &f, &mut g, false);
             power(&sc.net, &f, &mut g);
         }
+        Tier::Small => buildings(sc, &f, &mut g, true),
         Tier::Detail => trees(sc, &f, &mut g, false),
         Tier::Far => trees(sc, &f, &mut g, true),
         Tier::Fields => {
@@ -262,15 +260,10 @@ pub(super) fn building(b: &Building, f: &Frame, g: &mut Geom) {
     match b.kind {
         Kind::House | Kind::Apartment | Kind::Shed | Kind::Barn | Kind::Church | Kind::Tower => {
             g.walls(b.wall, &foot, 0.0, b.h);
-            let rise = match b.kind {
-                Kind::Shed => b.w * 0.18,
-                Kind::Church => b.w * 0.6,
-                _ => b.w * 0.42,
-            };
             match b.roof {
                 Roof::Flat => g.cap(b.roof_colour, &foot, b.h),
-                Roof::Gable => g.gable(b.wall, b.roof_colour, &foot, b.h, rise),
-                Roof::Hip => g.hip(b.roof_colour, &foot, b.h, rise * 0.85),
+                Roof::Gable => g.gable(b.wall, b.roof_colour, &foot, b.h, roof_height(b)),
+                Roof::Hip => g.hip(b.roof_colour, &foot, b.h, roof_height(b)),
             }
             if b.kind == Kind::Church {
                 let t = c - along * (b.l * 0.5 + 3.2);
@@ -455,14 +448,83 @@ fn ruin(b: &Building, c: Vec3, d: Vec2, rng: &mut Rng, g: &mut Geom) {
     }
 }
 
-/// Lit windows at night on the long sides.
-fn windows(b: &Building, c: Vec3, d: Vec2, rng: &mut Rng, g: &mut Geom) {
-    let n = match b.kind {
+/// Height of a building's pitched roof above its walls (0 for a flat roof).
+pub(super) fn roof_height(b: &Building) -> f32 {
+    let rise = match b.kind {
+        Kind::Shed => b.w * 0.18,
+        Kind::Church => b.w * 0.6,
+        _ => b.w * 0.42,
+    };
+    match b.roof {
+        Roof::Flat => 0.0,
+        Roof::Gable => rise,
+        Roof::Hip => rise * 0.85,
+    }
+}
+
+/// The buildings of a block: those drawn only near the viewpoint (`near`) or all the others.
+fn buildings(sc: &Scenery, f: &Frame, g: &mut Geom, near: bool) {
+    // The index lists a building in every cell it overlaps: once each.
+    let mut ids: Vec<u32> =
+        sc.net.building_index.around(f.min, f.min + DVec2::splat(BLOCK)).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    for i in ids {
+        let b = &sc.net.buildings[i as usize];
+        if !f.contains(b.p) || sc.net.near_only.contains(&i) != near {
+            continue;
+        }
+        match sc.net.outlines.get(&i) {
+            Some(o) => footprint(b, o, f, g),
+            None => building(b, f, g),
+        }
+    }
+}
+
+/// A building on a real footprint (`osm.rs`): walls along the outline and the courtyards, a
+/// flat roof, lit windows on its sides.
+fn footprint(b: &Building, o: &Outline, f: &Frame, g: &mut Geom) {
+    let up = Vec3::Y * b.h;
+    // Outward: right of the outline (counter-clockwise) and of the courtyards (clockwise).
+    for ring in std::iter::once(&o.outer).chain(&o.holes) {
+        let foot: Vec<Vec3> = ring.iter().map(|&p| f.at(p, 0.0)).collect();
+        for i in 0..ring.len() {
+            let j = (i + 1) % ring.len();
+            let out = dir3(-(ring[j] - ring[i]).perp());
+            g.face(b.wall, &[foot[i], foot[j], foot[j] + up, foot[i] + up], out);
+        }
+    }
+    for t in &o.roof {
+        g.face(b.roof_colour, &t.map(|p| f.at(p, b.h)), Vec3::Y);
+    }
+    if b.kind == Kind::Tower && b.h > 60.0 {
+        g.lamp(BEACON, f.at(o.roof_point(), b.h + 1.0));
+    }
+    let (pts, n) = (&o.outer, o.outer.len());
+    let mut rng = Rng::new(b.seed);
+    let floors = (b.h / 3.0).floor().max(1.0);
+    for _ in 0..lit_windows(b.kind, &mut rng) {
+        let i = (rng.u64() % n as u64) as usize;
+        let (a, e) = (pts[i], pts[(i + 1) % n]);
+        let out = -(e - a).perp().normalize_or_zero();
+        let floor = (rng.f() * floors as f64).floor() as f32;
+        g.lamp(WINDOW, f.at(a.lerp(e, rng.range(0.15, 0.85)) + out * 0.15, floor * 3.0 + 1.6));
+    }
+}
+
+/// How many windows of a building are lit at night.
+fn lit_windows(kind: Kind, rng: &mut Rng) -> i32 {
+    match kind {
         Kind::Apartment => rng.range(1.0, 7.0) as i32,
         Kind::Tower => rng.range(2.0, 10.0) as i32,
         Kind::House if rng.chance(0.45) => 1,
         _ => 0,
-    };
+    }
+}
+
+/// Lit windows at night on the long sides.
+fn windows(b: &Building, c: Vec3, d: Vec2, rng: &mut Rng, g: &mut Geom) {
+    let n = lit_windows(b.kind, rng);
     let along = Vec3::new(d.x, 0.0, d.y);
     let across = Vec3::new(-d.y, 0.0, d.x);
     let floors = (b.h / 3.0).floor().max(1.0);

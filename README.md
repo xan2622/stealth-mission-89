@@ -85,6 +85,28 @@ missions follow Central Europe's rules (`--theater ua`).
 - The Zaporizhzhia, South Ukraine, Rostov, Kursk and Novovoronezh nuclear power plants.
 - Fires and smoke burn along the whole front line and in the ruined towns in every mission.
 
+### OpenStreetMap towns (test)
+
+"Ukraine OSM (test)" (`--theater uo`) is a copy of the Ukraine theater whose Kharkiv is built
+from the real building footprints (with their courtyards) and streets of OpenStreetMap (central
+3 km radius, about 13 000 buildings and 335 000 triangles with the town's ruins), instead of a
+generated street grid.
+A town takes them from `assets/osm/<name>.ron` when its entry in the theater file has
+`osm: Some("<name>")`.
+- Houses and other small buildings (almost half the triangles) are drawn within 2.5 km only.
+- Flying into a building is a collision, like the theater's own objects.
+- The drone defense mission always protects Kharkiv there (`drone_targets` in
+  `assets/mission/theaters/uo.json`): intercept the Geran wave over the city.
+
+```sh
+python3 tools/osm/extract.py Kharkiv [--radius 3000]   # writes assets/osm/kharkiv.ron
+cargo run --release -- --theater uo --freecam --pos 226494,-378300 --alt 600 --look-pitch -20
+cargo run --release -- --mission 7 --theater uo --kind 4   # drone defense over Kharkiv
+```
+
+Map data © OpenStreetMap contributors, available under the
+[Open Database License](https://www.openstreetmap.org/copyright).
+
 ## Controls (original keyboard layout)
 
 | Action | Key |

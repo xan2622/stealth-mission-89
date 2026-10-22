@@ -241,7 +241,7 @@ pub fn next_sortie(
     aircraft: crate::aircraft::AircraftKind,
 ) -> Option<(u16, Mission)> {
     let t = pilot.tour.as_ref()?;
-    let drones = THEATERS.get(t.theater).is_some_and(|(id, _)| *id == "ua");
+    let drones = THEATERS.get(t.theater).is_some_and(|(id, _)| matches!(*id, "ua" | "uo"));
     for k in 0..SORTIE_TRIES {
         let s = menu.seed.wrapping_add(k as u16 * 7919);
         let kind = match s % 20 {

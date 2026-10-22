@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::f32::consts::TAU;
 
+use bevy::math::DVec2;
 use bevy::prelude::*;
 
 #[derive(Default)]
@@ -155,6 +156,83 @@ fn fan(tris: &mut Vec<Vec3>, pts: &[Vec3], out: Vec3) {
     }
 }
 
+/// Ear-clipping triangulation of a simple polygon wound counter-clockwise (ground metres, y
+/// north), as index triples; concave outlines too. Collinear points are dropped; what is left
+/// of a self-intersecting outline is fanned.
+pub fn triangulate(pts: &[DVec2]) -> Vec<[usize; 3]> {
+    let turn = |a: usize, b: usize, c: usize| (pts[b] - pts[a]).perp_dot(pts[c] - pts[a]);
+    let inside = |p: usize, a: usize, b: usize, c: usize| {
+        let q = pts[p];
+        if q == pts[a] || q == pts[b] || q == pts[c] {
+            return false;
+        }
+        let side = |u: usize, v: usize| (pts[v] - pts[u]).perp_dot(q - pts[u]) >= 0.0;
+        side(a, b) && side(b, c) && side(c, a)
+    };
+    let mut left: Vec<usize> = (0..pts.len()).collect();
+    let mut out = Vec::with_capacity(pts.len().saturating_sub(2));
+    // Walk round the outline clipping ears; a whole round without one: give up.
+    let (mut i, mut misses) = (0, 0);
+    while left.len() > 3 && misses < left.len() {
+        let n = left.len();
+        i %= n;
+        let (a, b, c) = (left[(i + n - 1) % n], left[i], left[(i + 1) % n]);
+        let t = turn(a, b, c);
+        let flat = t.abs() < 1e-9;
+        if flat || (t > 0.0 && !left.iter().any(|&p| inside(p, a, b, c))) {
+            if !flat {
+                out.push([a, b, c]);
+            }
+            left.remove(i);
+            // The previous corner may have become an ear.
+            i = i.saturating_sub(1);
+            misses = 0;
+        } else {
+            i += 1;
+            misses += 1;
+        }
+    }
+    for k in 1..left.len().saturating_sub(1) {
+        out.push([left[0], left[k], left[k + 1]]);
+    }
+    out
+}
+
+/// A polygon with holes as one outline for [`triangulate`]: each hole (clockwise) joins the
+/// outline (counter-clockwise) by a bridge from its rightmost point to the nearest outline
+/// point in sight, the rightmost holes first.
+pub fn bridge_holes(outer: &[DVec2], holes: &[Vec<DVec2>]) -> Vec<DVec2> {
+    // Proper crossing (shared end points don't count).
+    let cross = |a: DVec2, b: DVec2, c: DVec2, d: DVec2| {
+        let s = |p: DVec2, q: DVec2, r: DVec2| (q - p).perp_dot(r - p);
+        s(a, b, c) * s(a, b, d) < 0.0 && s(c, d, a) * s(c, d, b) < 0.0
+    };
+    let edges =
+        |r: &[DVec2]| (0..r.len()).map(|i| (r[i], r[(i + 1) % r.len()])).collect::<Vec<_>>();
+    let right = |h: &[DVec2]| h.iter().map(|p| p.x).fold(f64::MIN, f64::max);
+    let mut order: Vec<&Vec<DVec2>> = holes.iter().filter(|h| h.len() >= 3).collect();
+    order.sort_by(|a, b| right(b).total_cmp(&right(a)));
+    let mut poly = outer.to_vec();
+    for hole in order {
+        let m = (0..hole.len()).max_by(|&a, &b| hole[a].x.total_cmp(&hole[b].x)).unwrap();
+        let pm = hole[m];
+        let blockers: Vec<(DVec2, DVec2)> =
+            edges(&poly).into_iter().chain(holes.iter().flat_map(|h| edges(h))).collect();
+        let near = |i: &usize| poly[*i].distance_squared(pm);
+        let seen = (0..poly.len())
+            .filter(|&i| !blockers.iter().any(|&(c, d)| cross(pm, poly[i], c, d)))
+            .min_by(|a, b| near(a).total_cmp(&near(b)));
+        let best = seen
+            .unwrap_or_else(|| (0..poly.len()).min_by(|a, b| near(a).total_cmp(&near(b))).unwrap());
+        let mut joined = Vec::with_capacity(poly.len() + hole.len() + 2);
+        joined.extend_from_slice(&poly[..=best]);
+        joined.extend((0..=hole.len()).map(|j| hole[(m + j) % hole.len()]));
+        joined.extend_from_slice(&poly[best..]);
+        poly = joined;
+    }
+    poly
+}
+
 /// Corners of a rectangle centred at `c` (length `l` along `dir`, width `w`), counter-clockwise
 /// seen from above, starting with the edge along `dir`.
 pub fn rect(c: Vec3, dir: Vec2, l: f32, w: f32) -> [Vec3; 4] {
@@ -171,4 +249,53 @@ pub fn ring(c: Vec3, r: f32, n: usize, phase: f32) -> Vec<Vec3> {
             c + Vec3::new(a.cos() * r, 0.0, a.sin() * r)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tri_area(pts: &[DVec2], t: [usize; 3]) -> f64 {
+        (pts[t[1]] - pts[t[0]]).perp_dot(pts[t[2]] - pts[t[0]]) * 0.5
+    }
+
+    #[test]
+    fn triangulates_concave_outlines() {
+        // An L (area 300) and a U (area 700) with a collinear point on the bottom edge.
+        let l = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0), (10.0, 20.0), (0.0, 20.0)];
+        let u = [
+            (0.0, 0.0),
+            (15.0, 0.0),
+            (30.0, 0.0),
+            (30.0, 30.0),
+            (20.0, 30.0),
+            (20.0, 10.0),
+            (10.0, 10.0),
+            (10.0, 30.0),
+            (0.0, 30.0),
+        ];
+        for (shape, area) in [(&l[..], 300.0), (&u[..], 700.0)] {
+            let pts: Vec<DVec2> = shape.iter().map(|&(x, y)| DVec2::new(x, y)).collect();
+            let tris = triangulate(&pts);
+            assert!(tris.iter().all(|&t| tri_area(&pts, t) > 0.0), "{tris:?}");
+            let sum: f64 = tris.iter().map(|&t| tri_area(&pts, t)).sum();
+            assert!((sum - area).abs() < 1e-6, "{sum}");
+        }
+    }
+
+    #[test]
+    fn triangulates_courtyards() {
+        // A 30 m square with two courtyards (clockwise): 900 - 100 - 40.
+        let pts = |v: &[(f64, f64)]| v.iter().map(|&(x, y)| DVec2::new(x, y)).collect::<Vec<_>>();
+        let outer = pts(&[(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (0.0, 30.0)]);
+        let holes = vec![
+            pts(&[(5.0, 5.0), (5.0, 15.0), (15.0, 15.0), (15.0, 5.0)]),
+            pts(&[(20.0, 20.0), (20.0, 25.0), (28.0, 25.0), (28.0, 20.0)]),
+        ];
+        let poly = bridge_holes(&outer, &holes);
+        let tris = triangulate(&poly);
+        let sum: f64 = tris.iter().map(|&t| tri_area(&poly, t)).sum();
+        assert!(tris.iter().all(|&t| tri_area(&poly, t) >= 0.0), "{tris:?}");
+        assert!((sum - (900.0 - 100.0 - 40.0)).abs() < 1e-6, "{sum}");
+    }
 }

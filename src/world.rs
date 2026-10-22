@@ -166,7 +166,7 @@ pub fn geo_origin(id: &str) -> (f64, f64) {
         // Bushehr.
         "pg" => (48.67, 26.48),
         // Dzhankoi.
-        "ua" => (32.51, 44.78),
+        "ua" | "uo" => (32.51, 44.78),
         // Gia Lam (Hanoi).
         "vn" => (101.84, 17.04),
         _ => (10.0, 45.0),
@@ -263,6 +263,10 @@ pub struct TownSite {
     pub kind: u8,
     #[serde(default)]
     pub ruined: f64,
+    /// Real buildings and streets instead of generated ones: `assets/osm/<name>.ron`, from
+    /// `tools/osm/extract.py`.
+    #[serde(default)]
+    pub osm: Option<String>,
 }
 
 impl Theater {
